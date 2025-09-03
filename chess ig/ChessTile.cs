@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -26,8 +28,9 @@ namespace chess_ig
     internal class ChessTile
     {
 
-        public ChessPieceType _chessPieceType { get; set; }
-        public ChessTeam _chessTeam { get; set; }
+        public ChessPieceType ChessPieceType { get; set; }
+        public ChessTeam ChessTeam { get; set; }
+        public bool HasMoved = false;
 
         private IChessPieceInterface[] chessBehaviours = new IChessPieceInterface[]
         {
@@ -38,15 +41,16 @@ namespace chess_ig
             new King(),
             new Queen(),
         };
-        public ChessTile(ChessPieceType chessPieceType, ChessTeam typeOfChessTile)
+        public ChessTile(ChessPieceType chessPieceType, ChessTeam typeOfChessTile, bool hasMoved = false)
         {
-            _chessPieceType = chessPieceType;
-            _chessTeam = typeOfChessTile;
+            ChessPieceType = chessPieceType;
+            ChessTeam = typeOfChessTile;
+            HasMoved = hasMoved;
         }
         public List<(int, int)> GetMovePositions(ChessTile[,] chessBoard, (int, int) position)
         {
 
-            return chessBehaviours[(int)_chessPieceType - 1].GetMovePositions(chessBoard, position);
+            return chessBehaviours[(int)ChessPieceType - 1].GetMovePositions(chessBoard, position);
         }
 
         public static bool IsInBounds((int, int) position, int boardSizeX, int boardSizeY)
@@ -55,7 +59,7 @@ namespace chess_ig
         }
         public static bool IsTileOpen(ChessTile currentTile, ChessTile newTile)
         {
-            return newTile._chessPieceType == ChessPieceType.None || newTile._chessTeam != currentTile._chessTeam;
+            return newTile.ChessPieceType == ChessPieceType.None || newTile.ChessTeam != currentTile.ChessTeam;
         }
         public static bool IsMoveValid((int, int) position, int boardSizeX, int boardSizeY, ChessTile currentTile, ChessTile newTile)
         {
@@ -63,7 +67,7 @@ namespace chess_ig
         }
         public bool CheckPromotion(int xPos)
         {
-            if (_chessPieceType == ChessPieceType.Pawn && (_chessTeam == ChessTeam.white && xPos == 7 || _chessTeam == ChessTeam.black && xPos == 0))
+            if (ChessPieceType == ChessPieceType.Pawn && (ChessTeam == ChessTeam.white && xPos == 7 || ChessTeam == ChessTeam.black && xPos == 0))
             {
                 return true;
             }
@@ -86,20 +90,20 @@ namespace chess_ig
                 {
                     returnValues.Add((x, y));
                 }
-                if (newTile._chessTeam != ChessTeam.none)
+                if (newTile.ChessTeam != ChessTeam.none)
                 {
                     break; // Stop if we hit a piece
                 }
             }
         }
-        public static HashSet<(int,int)> GetTerritory(ChessTile[,] chessBoard, int chessboardSize, ChessTeam checkingTeam)
+        public static HashSet<(int, int)> GetTerritory(ChessTile[,] chessBoard, int chessboardSize, ChessTeam checkingTeam)
         {
             HashSet<(int, int)> tilesInDanger = new HashSet<(int, int)>();
             for (int x = 0; x < chessboardSize; x++)
             {
                 for (int y = 0; y < chessboardSize; y++)
                 {
-                    if (chessBoard[x, y]._chessTeam != checkingTeam)
+                    if (chessBoard[x, y].ChessTeam != checkingTeam)
                     {
                         continue; // Only check white pieces if checkingTeam is white
                     }
@@ -111,18 +115,43 @@ namespace chess_ig
             }
             return tilesInDanger;
         }
-        public static void IsKingInCheck(ChessTile[,] chessBoard, int chessboardSize, ChessTeam checkingTeam, out bool inCheck, in HashSet<(int, int)> tilesInDanger)
+        public static void IsKingInCheck(ChessTile[,] chessBoard, ChessTeam whichKing, out bool inCheck, in HashSet<(int, int)> tilesInDanger)
         {
             inCheck = false;
             foreach (var index in tilesInDanger)
             {
                 ref ChessTile tile = ref chessBoard[index.Item1, index.Item2];
-                if (tile._chessPieceType == ChessPieceType.King && tile._chessTeam != checkingTeam)
+                if (tile.ChessPieceType == ChessPieceType.King && tile.ChessTeam == whichKing)
                 {
                     inCheck = true;
                     break;
                 }
             }
+        }
+        public void TransferTo(ref ChessTile targetTile)
+        {
+            targetTile.ChessPieceType = ChessPieceType;
+            targetTile.ChessTeam = ChessTeam;
+            targetTile.HasMoved = true;
+
+            ChessPieceType = ChessPieceType.None;
+            ChessTeam = ChessTeam.none;
+        }
+        public static ChessTile[,] SimulateMove(in ChessTile[,] chessBoard, int chessboardSize, (int, int) startPos, (int, int) endPos)
+        {
+            ChessTile[,] chessBoardArchive = new ChessTile[chessboardSize, chessboardSize];
+
+            for (int x = 0; x < chessboardSize; x++)
+            {
+                for (int y = 0; y < chessboardSize; y++)
+                {
+                    chessBoardArchive[x, y] = new ChessTile(chessBoard[x, y].ChessPieceType, chessBoard[x, y].ChessTeam, chessBoard[x, y].HasMoved);
+                }
+            }
+
+            chessBoardArchive[startPos.Item1, startPos.Item2].TransferTo(ref chessBoardArchive[endPos.Item1, endPos.Item2]);
+
+            return chessBoardArchive;
         }
     }
     interface IChessPieceInterface
@@ -143,61 +172,33 @@ namespace chess_ig
             int boardSizeY = chessBoard.GetLength(1);
             int xChecking;
             int yChecking;
-            if (currentTile._chessTeam == ChessTeam.white)
+            bool isWhite = currentTile.ChessTeam == ChessTeam.white;
+            ChessTeam oppositeTeam = isWhite ? ChessTeam.black : ChessTeam.white;
+            yChecking = position.Item2;
+
+            xChecking = position.Item1 + (isWhite ? 1 : -1);
+            if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && chessBoard[xChecking, position.Item2].ChessTeam == ChessTeam.none)
             {
-                yChecking = position.Item2;
+                returnValues.Add((xChecking, yChecking));
+                xChecking = position.Item1 + (isWhite ? 2 : -2);
 
-                xChecking = position.Item1 + 2;
-                if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && position.Item1 == 1 && chessBoard[xChecking, position.Item2]._chessTeam == ChessTeam.none)
-                {
-                    returnValues.Add((xChecking, yChecking));
-                }
-
-                xChecking = position.Item1 + 1;
-                if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && chessBoard[xChecking, position.Item2]._chessTeam == ChessTeam.none)
-                {
-                    returnValues.Add((xChecking, yChecking));
-                }
-
-                yChecking = position.Item2 + 1;
-                if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && chessBoard[xChecking, yChecking]._chessTeam == ChessTeam.black)
-                {
-                    returnValues.Add((xChecking, yChecking));
-                }
-
-                yChecking = position.Item2 - 1;
-                if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && chessBoard[xChecking, yChecking]._chessTeam == ChessTeam.black)
+                if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && !currentTile.HasMoved && chessBoard[xChecking, position.Item2].ChessTeam == ChessTeam.none)
                 {
                     returnValues.Add((xChecking, yChecking));
                 }
             }
-            else if (currentTile._chessTeam == ChessTeam.black)
+
+            xChecking = position.Item1 + (isWhite ? 1 : -1);
+            yChecking = position.Item2 + 1;
+            if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && chessBoard[xChecking, yChecking].ChessTeam == oppositeTeam)
             {
-                yChecking = position.Item2;
+                returnValues.Add((xChecking, yChecking));
+            }
 
-                xChecking = position.Item1 - 2;
-                if (position.Item1 == 6 && chessBoard[xChecking, position.Item2]._chessTeam == ChessTeam.none)
-                {
-                    returnValues.Add((xChecking, yChecking));
-                }
-
-                xChecking = position.Item1 - 1;
-                if (chessBoard[xChecking, position.Item2]._chessTeam == ChessTeam.none)
-                {
-                    returnValues.Add((xChecking, yChecking));
-                }
-
-                yChecking = position.Item2 + 1;
-                if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && chessBoard[xChecking, yChecking]._chessTeam == ChessTeam.white)
-                {
-                    returnValues.Add((xChecking, yChecking));
-                }
-
-                yChecking = position.Item2 - 1;
-                if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && chessBoard[xChecking, yChecking]._chessTeam == ChessTeam.white)
-                {
-                    returnValues.Add((xChecking, yChecking));
-                }
+            yChecking = position.Item2 - 1;
+            if (ChessTile.IsInBounds((xChecking, yChecking), boardSizeX, boardSizeY) && chessBoard[xChecking, yChecking].ChessTeam == oppositeTeam)
+            {
+                returnValues.Add((xChecking, yChecking));
             }
 
             return returnValues;
@@ -312,10 +313,16 @@ namespace chess_ig
     }
     internal class King : IChessPieceInterface
     {
+        (int x, int y)[] rookStartPos = new (int x, int y)[4]
+        {
+            (0,0), (0,7), // White Rooks
+            (7,0), (7,7)  // Black Rooks
+        };
         public List<(int, int)> GetMovePositions(ChessTile[,] chessBoard, (int, int) position)
         {
             // A knight can move in an "L" shape: two squares in one direction and then one square perpendicular, or one square in one direction and then two squares perpendicular.
             List<(int, int)> returnValues = new List<(int, int)>();
+            ref var currentTile = ref chessBoard[position.Item1, position.Item2];
 
             int boardSizeX = chessBoard.GetLength(0);
             int boardSizeY = chessBoard.GetLength(1);
@@ -326,6 +333,48 @@ namespace chess_ig
             int clampMaxX = Math.Min(position.Item1 + 1, boardSizeX - 1);
             int clampMaxY = Math.Min(position.Item2 + 1, boardSizeY - 1);
 
+
+            if (!currentTile.HasMoved)
+            {
+                // Check for castling
+                List<(int x, int y)> viableRooks = new List<(int x, int y)>(2);
+                int CheckIndexX = position.Item1;
+                foreach (var (x, y) in rookStartPos)
+                {
+                    ref ChessTile chessTile = ref chessBoard[x, y];
+                    if (chessTile.ChessTeam == currentTile.ChessTeam &&
+                        !chessTile.HasMoved
+                        )
+                    {
+                        int CheckIndexStartY = Math.Min(y, position.Item2);
+                        int CheckIndexEndY = Math.Max(y, position.Item2);
+                        bool pathClear = true;
+                        for (int i = CheckIndexStartY + 1; i < CheckIndexEndY; i++)
+                        {
+                            if (chessBoard[x, i].ChessPieceType != ChessPieceType.None)
+                            {
+                                pathClear = false; // There is a piece in the way
+                            }
+                        }
+                        if (!pathClear) continue;
+                        viableRooks.Add((x, y));
+                    }
+                }
+                foreach ((int x, int y) rookIndex in viableRooks)
+                {
+                    int difference = Math.Clamp(rookIndex.y - position.Item2, -2, 2);
+                    int indexX = position.Item1;
+                    int indexY = position.Item2 + difference;
+                    ref ChessTile newTile = ref chessBoard[indexX, indexY];
+                    if (ChessTile.IsTileOpen(currentTile, newTile))
+                    {
+                        returnValues.Add((indexX, indexY));
+                    }
+                }
+                
+            }
+
+
             for (int x = clampMinX; x <= clampMaxX; x++)
             {
                 for (int y = clampMinY; y <= clampMaxY; y++)
@@ -335,7 +384,7 @@ namespace chess_ig
                         continue; // Skip the current tile
                     }
                     ref ChessTile newTile = ref chessBoard[x, y];
-                    if (ChessTile.IsTileOpen(chessBoard[position.Item1, position.Item2], newTile))
+                    if (ChessTile.IsTileOpen(currentTile, newTile))
                     {
                         returnValues.Add((x, y));
                     }
